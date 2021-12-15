@@ -13,12 +13,20 @@ class AssetModel(StochasticProcess):
         self.mu = mu
         self.r = r
 
-    def generateValues(self, t=None, nVals=1):
+    def generateValues(self, nVals=1, t=None, x0=None):
         _t = t or self.T
-        return self.x0 * np.exp((self.r - self.mu) * _t + self.logPriceProcess.generateValues(_t, nVals))
+        _x0 = x0 or self.x0
+        return _x0 * np.exp((self.r - self.mu) * _t + self.logPriceProcess.generateValues(nVals, _t))
 
     def generatePaths(self, nPaths=1):
         return self.x0 * np.exp((self.r - self.mu) * self.timePoints + self.logPriceProcess.generatePaths(nPaths).T).T
+
+    def OptionPriceMC(self, payoffFunc, assetVal=None, expiry=None, nSim=1000000):
+        T = expiry or self.T
+        s = assetVal or self.x0
+        assert T <= self.T, 'Time to maturity is not covered by the asset model'
+        payoff = payoffFunc(self.generateValues(nSim, T, s))
+        return np.exp(-self.r * T) * payoff.mean()
 
 
 class MertonModel(AssetModel):
@@ -45,5 +53,16 @@ class NIGModel(AssetModel):
         logPrice = NIGProcess(T=T, nSteps=nSteps, theta=theta, sigma=sigma, kappa=kappa)
         mu = (1 - np.sqrt(1 - 2 * kappa * theta - kappa * sigma ** 2)) / kappa
         super().__init__(logPrice, s0=s0, mu=mu, r=r)
+        self.name = 'NIG Model'
+
+class BlackScholesModel(AssetModel):
+    """
+    Black Scholes model (only to compare to analytical model)
+    """
+
+    def __init__(self, sigma=0.2, r=0.05, s0=1., T=1., nSteps=10000):
+        super().__init__(BrownianMotionWithDrift(T=T, nSteps=nSteps, sigma=sigma), s0=s0, mu=sigma**2/2, r=r)
+        self.name = 'Black Scholes Model'
+
 
 
