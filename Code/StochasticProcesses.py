@@ -105,9 +105,9 @@ class CompoundPoissonProcess(StochasticProcess):
 
 class JumpDiffusionProcess(StochasticProcess):
 
-    def __init__(self, BrownianPart, JumpPart, T=1, x0=0., mu=0.):
+    def __init__(self, BrownianPart, JumpPart, x0=0., mu=0.):
         assert (BrownianPart.timePoints == JumpPart.timePoints).all(), 'Time grids of Brownian part and jump part do not coincide!'
-        super().__init__(name='Jump Diffusion Process', T=T, x0=x0, nSteps=len(BrownianPart.timePoints))
+        super().__init__(name='Jump Diffusion Process', T=BrownianPart.T, x0=x0, nSteps=BrownianPart.nSteps)
         self.BrownianPart = BrownianPart
         self.JumpPart = JumpPart
         self.mu = mu
