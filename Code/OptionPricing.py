@@ -22,11 +22,27 @@ class AssetModel(StochasticProcess):
         return self.x0 * np.exp((self.r - self.mu) * self.timePoints + self.logPriceProcess.generatePaths(nPaths).T).T
 
     def OptionPriceMC(self, payoffFunc, assetVal=None, expiry=None, nSim=1000000):
+        # calculates price of an option given by its payoff function, the current underlying value and time to maturity
         T = expiry or self.T
         s = assetVal or self.x0
         assert T <= self.T, 'Time to maturity is not covered by the asset model'
         payoff = payoffFunc(self.generateValues(nSim, T, s))
         return np.exp(-self.r * T) * payoff.mean()
+
+    def OptionPriceRangeMC(self, payoffFunc, assetStartVals, expiry=None, nSim=1000000):
+        # calclates option prices for an array of underlying values and fixed payoff
+        T = expiry or self.T
+        assert T <= self.T, 'Time to maturity is not covered by the asset model'
+        assetEndVals = self.generateValues(nSim, T, 1.)
+        return np.array([np.exp(-self.r * T) * payoffFunc(s * assetEndVals).mean() for s in assetStartVals])
+
+    def OptionPricePayOffRangeMC(self, payoffFuncs, assetVal=None, expiry=None, nSim=1000000):
+        # calculates option prices for an array of payoff functions and fixed underlying value
+        T = expiry or self.T
+        assert T <= self.T, 'Time to maturity is not covered by the asset model'
+        s = assetVal or self.x0
+        assetEndVals = self.generateValues(nSim, T, s)
+        return np.array([np.exp(-self.r * T) * payoff(assetEndVals).mean() for payoff in payoffFuncs])
 
 
 class MertonModel(AssetModel):
