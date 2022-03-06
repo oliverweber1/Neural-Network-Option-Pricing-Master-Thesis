@@ -61,17 +61,23 @@ class BrownianMotionWithDrift(StochasticProcess):
 
 class PoissonProcess(StochasticProcess):
 
-    def __init__(self, lam, T=1, x0=0., nSteps=10000):
+    def __init__(self, lam, T=1, x0=0., nSteps=10000, compensated=False):
         super().__init__(name='Poisson Process', T=T, x0=x0, nSteps=nSteps)
         self.lam = lam
+        self.compensated = compensated
 
     def generateValues(self, nVals=1, t=None, x0=None):
         _t = t or self.T
         _x0 = x0 or self.x0
-        return _x0 + sp.poisson.rvs(mu=self.lam * _t, size=nVals)
+        values = _x0 + sp.poisson.rvs(mu=self.lam * _t, size=nVals)
+        if self.compensated:
+            values -= self.lam * _t
+        return values
 
     def generatePaths(self, nPaths=1):
         paths = pd.DataFrame(np.ones((len(self.timePoints), nPaths)) * self.x0, index=self.timePoints)
+        if self.compensated:
+            paths = paths.sub(self.timePoints * self.lam, axis=0)
         numberOfJumps = sp.poisson.rvs(mu=self.lam*self.T, size=nPaths)
         jumpTimes = np.array([sp.uniform.rvs(scale=self.T, size=n) for n in numberOfJumps], dtype=object)
         for i, jumps in enumerate(jumpTimes):
@@ -82,10 +88,11 @@ class PoissonProcess(StochasticProcess):
 
 class CompoundPoissonProcess(StochasticProcess):
 
-    def __init__(self, lam, T=1, x0=0., nSteps=10000, jumpSizeRV=sp.norm):
+    def __init__(self, lam, T=1, x0=0., nSteps=10000, jumpSizeRV=sp.norm, compensated=False):
         super().__init__(name='Compound Poisson Process', T=T, x0=x0, nSteps=nSteps)
         self.lam = lam
         self.jumpSizeRV = jumpSizeRV
+        self.compensated = compensated
 
     def generateValues(self, nVals=1, t=None, x0=None):
         _t = t or self.T
@@ -94,10 +101,16 @@ class CompoundPoissonProcess(StochasticProcess):
         maxJumps = np.max(numOfJumps)
         jumpSizes = self.jumpSizeRV.rvs(size=(nVals, maxJumps))
         jumpSizes[numOfJumps[:,None] <= np.arange(jumpSizes.shape[1])] = 0
-        return (_x0 + jumpSizes.sum(axis=1))
+        values = (_x0 + jumpSizes.sum(axis=1))
+        if self.compensated:
+            values -= self.lam * _t * self.jumpSizeRV.mean()
+        return values
+
 
     def generatePaths(self, nPaths=1):
         paths = pd.DataFrame(np.ones((len(self.timePoints), nPaths)) * self.x0, index=self.timePoints)
+        if self.compensated:
+            paths = paths.sub(self.timePoints * self.lam * self.jumpSizeRV.mean(), axis=0)
         numberOfJumps = sp.poisson.rvs(mu=self.lam*self.T, size=nPaths)
         jumpTimes = np.array([sp.uniform.rvs(scale=self.T, size=n) for n in numberOfJumps], dtype=object)
         for i, jumps in enumerate(jumpTimes):

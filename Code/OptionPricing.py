@@ -4,7 +4,7 @@ class AssetModel(StochasticProcess):
     """
     Asset model under risk neutral measure S_t = s0 * exp(r*t - mu*t + X_t)
     for a StochasticProcess (X_t)_t>=0
-    Additional drift mu can be used for to "center" models (martingale condition for exp(-r*t)*S_t)
+    Additional drift mu can be used to "center" models (martingale condition for exp(-r*t)*S_t)
     """
 
     def __init__(self, logPriceProcess, s0=1., mu=0., r=0.05):
