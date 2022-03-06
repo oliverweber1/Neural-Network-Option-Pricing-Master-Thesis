@@ -15,7 +15,7 @@ class StochasticProcess:
     def generatePaths(self, nPaths=1):
         raise NotImplementedError('Must override generatePaths')
 
-    def generateValues(self, t=None, nVals=1):
+    def generateValues(self, nVals=1, t=None, x0=None):
         raise NotImplementedError('Must override generateValues')
 
     def plotPaths(self, figSize=(10,5), nPaths=1):
@@ -31,10 +31,10 @@ class BrownianMotion(StochasticProcess):
     def __init__(self, T=1, nSteps=10000):
         super().__init__(name='Standard Brownian Motion', T=T, x0=0., nSteps=nSteps)
 
-    def generateValues(self, t=None, nVals=1):
+    def generateValues(self, nVals=1, t=None, x0=None):
         _t = t or self.T
-        # Standard BM has distribution N(0, t) at time t
-        return sp.norm.rvs(scale=np.sqrt(_t), size=nVals)
+        _x0 = x0 or self.x0
+        return _x0 + sp.norm.rvs(scale=np.sqrt(_t), size=nVals)
 
     def generatePaths(self, nPaths=1):
         dt = self.T / (self.nSteps - 1)
@@ -50,9 +50,10 @@ class BrownianMotionWithDrift(StochasticProcess):
         self.sigma = sigma
         self.brownianDriver = BrownianMotion(T=T, nSteps=self.nSteps)
 
-    def generateValues(self, t=None, nVals=1):
+    def generateValues(self, nVals=1, t=None, x0=None):
         _t = t or self.T
-        return self.x0 + self.mu * _t + self.sigma * self.brownianDriver.generateValues(_t, nVals)
+        _x0 = x0 or self.x0
+        return self.x0 + self.mu * _t + self.sigma * self.brownianDriver.generateValues(nVals, _t)
 
     def generatePaths(self, nPaths=1):
         return (self.x0 + self.mu * self.timePoints + self.sigma * self.brownianDriver.generatePaths(nPaths).T).T
@@ -60,16 +61,23 @@ class BrownianMotionWithDrift(StochasticProcess):
 
 class PoissonProcess(StochasticProcess):
 
-    def __init__(self, lam, T=1, x0=0., nSteps=10000):
+    def __init__(self, lam, T=1, x0=0., nSteps=10000, compensated=False):
         super().__init__(name='Poisson Process', T=T, x0=x0, nSteps=nSteps)
         self.lam = lam
+        self.compensated = compensated
 
-    def generateValues(self, t=None, nVals=1):
+    def generateValues(self, nVals=1, t=None, x0=None):
         _t = t or self.T
-        return self.x0 + sp.poisson.rvs(mu=self.lam * _t, size=nVals)
+        _x0 = x0 or self.x0
+        values = _x0 + sp.poisson.rvs(mu=self.lam * _t, size=nVals)
+        if self.compensated:
+            values -= self.lam * _t
+        return values
 
     def generatePaths(self, nPaths=1):
         paths = pd.DataFrame(np.ones((len(self.timePoints), nPaths)) * self.x0, index=self.timePoints)
+        if self.compensated:
+            paths = paths.sub(self.timePoints * self.lam, axis=0)
         numberOfJumps = sp.poisson.rvs(mu=self.lam*self.T, size=nPaths)
         jumpTimes = np.array([sp.uniform.rvs(scale=self.T, size=n) for n in numberOfJumps], dtype=object)
         for i, jumps in enumerate(jumpTimes):
@@ -80,21 +88,29 @@ class PoissonProcess(StochasticProcess):
 
 class CompoundPoissonProcess(StochasticProcess):
 
-    def __init__(self, lam, T=1, x0=0., nSteps=10000, jumpSizeRV=sp.norm):
+    def __init__(self, lam, T=1, x0=0., nSteps=10000, jumpSizeRV=sp.norm, compensated=False):
         super().__init__(name='Compound Poisson Process', T=T, x0=x0, nSteps=nSteps)
         self.lam = lam
         self.jumpSizeRV = jumpSizeRV
+        self.compensated = compensated
 
-    def generateValues(self, t=None, nVals=1):
+    def generateValues(self, nVals=1, t=None, x0=None):
         _t = t or self.T
+        _x0 = x0 or self.x0
         numOfJumps = sp.poisson.rvs(mu=self.lam*_t, size=nVals)
         maxJumps = np.max(numOfJumps)
         jumpSizes = self.jumpSizeRV.rvs(size=(nVals, maxJumps))
         jumpSizes[numOfJumps[:,None] <= np.arange(jumpSizes.shape[1])] = 0
-        return (self.x0 + jumpSizes.sum(axis=1))
+        values = (_x0 + jumpSizes.sum(axis=1))
+        if self.compensated:
+            values -= self.lam * _t * self.jumpSizeRV.mean()
+        return values
+
 
     def generatePaths(self, nPaths=1):
         paths = pd.DataFrame(np.ones((len(self.timePoints), nPaths)) * self.x0, index=self.timePoints)
+        if self.compensated:
+            paths = paths.sub(self.timePoints * self.lam * self.jumpSizeRV.mean(), axis=0)
         numberOfJumps = sp.poisson.rvs(mu=self.lam*self.T, size=nPaths)
         jumpTimes = np.array([sp.uniform.rvs(scale=self.T, size=n) for n in numberOfJumps], dtype=object)
         for i, jumps in enumerate(jumpTimes):
@@ -105,16 +121,17 @@ class CompoundPoissonProcess(StochasticProcess):
 
 class JumpDiffusionProcess(StochasticProcess):
 
-    def __init__(self, BrownianPart, JumpPart, T=1, x0=0., mu=0.):
+    def __init__(self, BrownianPart, JumpPart, x0=0., mu=0.):
         assert (BrownianPart.timePoints == JumpPart.timePoints).all(), 'Time grids of Brownian part and jump part do not coincide!'
-        super().__init__(name='Jump Diffusion Process', T=T, x0=x0, nSteps=len(BrownianPart.timePoints))
+        super().__init__(name='Jump Diffusion Process', T=BrownianPart.T, x0=x0, nSteps=BrownianPart.nSteps)
         self.BrownianPart = BrownianPart
         self.JumpPart = JumpPart
         self.mu = mu
 
-    def generateValues(self, t=None, nVals=1):
+    def generateValues(self, nVals=1, t=None, x0=None):
         _t = t or self.T
-        return self.x0 + _t * self.mu + self.BrownianPart.generateValues(t=_t, nVals=nVals) + self.JumpPart.generateValues(t=_t, nVals=nVals)
+        _x0 = x0 or self.x0
+        return _x0 + _t * self.mu + self.BrownianPart.generateValues(nVals, _t) + self.JumpPart.generateValues(nVals, _t)
 
     def generatePaths(self, nPaths=1):
         return self.x0 + ((self.BrownianPart.generatePaths(nPaths) + self.JumpPart.generatePaths(nPaths)).T + self.timePoints * self.mu).T
@@ -128,12 +145,13 @@ class NIGProcess(StochasticProcess):
         self.sigma = sigma
         self.kappa = kappa
 
-    def generateValues(self, t=None, nVals=1):
+    def generateValues(self, nVals=1, t=None, x0=None):
         _t = t or self.T
+        _x0 = x0 or self.x0
         lam = _t ** 2 / self.kappa
         invGauss = sp.invgauss.rvs(mu=_t/lam, scale=lam, size=nVals)  # normally: mu=_t but scipy implementation of IG is different
         brownian = sp.norm.rvs(scale=self.sigma, size=nVals)
-        return self.x0 + self.theta * invGauss + np.sqrt(invGauss) * brownian
+        return _x0 + self.theta * invGauss + np.sqrt(invGauss) * brownian
 
     def generatePaths(self, nPaths=1):
         dt = self.T / (self.nSteps - 1)
