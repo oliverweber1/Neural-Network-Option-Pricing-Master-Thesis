@@ -1,4 +1,5 @@
 from StochasticProcesses import *
+from MultivariateProcesses import *
 
 class AssetModel(StochasticProcess):
     """
@@ -10,12 +11,15 @@ class AssetModel(StochasticProcess):
     def __init__(self, logPriceProcess, s0=1., mu=0., r=0.05):
         super().__init__(name=logPriceProcess.name.replace('Process', 'Model'), T=logPriceProcess.T, x0=s0, nSteps=logPriceProcess.nSteps)
         self.logPriceProcess = logPriceProcess
-        self.mu = mu
+        if self.d > 1:
+            self.mu = np.ones((self.d,1)) * mu if np.isscalar(mu) else mu.reshape((self.d,1))
+        else:
+            self.mu = mu
         self.r = r
 
     def generateValues(self, nVals=1, t=None, x0=None):
         _t = t or self.T
-        _x0 = x0 or self.x0
+        _x0 = self.x0 if x0 is None else x0
         return _x0 * np.exp((self.r - self.mu) * _t + self.logPriceProcess.generateValues(nVals, _t))
 
     def generatePaths(self, nPaths=1):
@@ -24,7 +28,9 @@ class AssetModel(StochasticProcess):
     def OptionPriceMC(self, payoffFunc, assetVal=None, expiry=None, nSim=1000000):
         # calculates price of an option given by its payoff function, the current underlying value and time to maturity
         T = expiry or self.T
-        s = assetVal or self.x0
+        s = self.x0 if assetVal is None else assetVal
+        if self.d > 1:
+            s = s.reshape((self.d, 1))
         assert T <= self.T, 'Time to maturity is not covered by the asset model'
         payoff = payoffFunc(self.generateValues(nSim, T, s))
         return np.exp(-self.r * T) * payoff.mean()
@@ -81,4 +87,43 @@ class BlackScholesModel(AssetModel):
         self.name = 'Black Scholes Model'
 
 
+class MultiAssetModel(AssetModel, MultivariateProcess):
+    """
+    Slight extension of AssetModel to make it work with multivariate processes
+    """
 
+    def generatePath(self):
+        return self.x0 * np.exp((self.r - self.mu) * self.timePoints + self.logPriceProcess.generatePath().T).T
+
+    def plotPath(self, figSize=(10,5)):
+        return MultivariateProcess.plotPath(self, figSize)
+
+class MultiAssetMertonModel(MultiAssetModel):
+    """
+    Extension of Merton Jump Diffusion Model to muldi-dimensional markets
+    """
+
+    def __init__(self, d, lam=3, mu_j=None, sig_j=None, Corr_j=None, sig_bm=None, Corr_bm=None, r=0.05, s0=1., T=1., nSteps=10000):
+        _mu_j = np.zeros((d, 1)) if mu_j is None else np.reshape(mu_j, (d, 1))
+        _sig_j = np.ones((d,1)) if sig_j is None else np.reshape(sig_j, (d,1))
+        _sig_bm = np.ones((d,1)) if sig_bm is None else np.reshape(sig_bm, (d,1))
+        JumpPart = MultivariateCompoundPoissonProcess(d=d, lam=lam, T=T, mu=mu_j, sigma=sig_j, Corr=Corr_j, nSteps=nSteps)
+        BrownianPart = CorrelatedBrownianMotion(d=d, T=T, sigma=sig_bm, Corr=Corr_bm, nSteps=nSteps)
+        logPriceProcess = MultivariateJumpDiffusionProcess(BrownianPart=BrownianPart, JumpPart=JumpPart)
+        expMomentJump = np.exp(_mu_j + _sig_j ** 2 / 2)
+        mu = _sig_bm ** 2 / 2 + lam * (expMomentJump - 1) # martingale correction
+        super().__init__(logPriceProcess, s0, mu, r)
+        self.name = 'Multivariate Merton Jump Diffusion Model'
+
+class MultiAssetNIGModel(MultiAssetModel):
+    """
+    Extension of NIG Model to multi-dimensional markets
+    """
+
+    def __init__(self, d, kappa=1., theta=None, sigma=None, Corr=None, r=0.05, s0=1., T=1, nSteps=10000):
+        _theta = np.zeros((d, 1)) if theta is None else np.reshape(theta, (d, 1))
+        _sigma = np.ones((d,1)) if sigma is None else np.reshape(sigma, (d,1))
+        logPriceProcess = MultivariateNIGProcess(d=d, T=T, nSteps=nSteps, kappa=kappa, theta=theta, sigma=sigma, Corr=Corr)
+        mu = (1 - np.sqrt(1 - 2 * kappa * _theta - kappa * _sigma ** 2)) / kappa # martingale correction
+        super().__init__(logPriceProcess, s0, mu, r)
+        self.name = 'Multivariate Normal Inverse Gaussian Model'

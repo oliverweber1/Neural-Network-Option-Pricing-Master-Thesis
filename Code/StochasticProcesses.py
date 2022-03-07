@@ -5,15 +5,22 @@ import matplotlib.pyplot as plt
 
 class StochasticProcess:
 
-    def __init__(self, name, T=1, x0=0., nSteps=10000):
+    def __init__(self, name, x0, T=1, nSteps=10000, d=1):
         self.name = name
         self.T = T
-        self.x0 = x0
+        self.d = d
+        if d > 1:
+            self.x0 = np.ones((d,1)) * x0 if np.isscalar(x0) else x0.reshape((d,1))
+        else:
+            self.x0 = x0
         self.nSteps = nSteps
         self.timePoints = np.linspace(0, T, nSteps)
 
     def generatePaths(self, nPaths=1):
         raise NotImplementedError('Must override generatePaths')
+    
+    def generatePath(self):
+        return self.generatePaths(1)
 
     def generateValues(self, nVals=1, t=None, x0=None):
         raise NotImplementedError('Must override generateValues')
@@ -24,6 +31,9 @@ class StochasticProcess:
         plt.plot(paths)
         plt.ylabel('$S_t$')
         plt.title('{} sample path{} of a {} '.format(nPaths, '' if nPaths == 1 else 's', self.name))
+
+    def plotPath(self, figSize=(10,5)):
+        return self.plotPaths(figSize, 1)
 
 
 class BrownianMotion(StochasticProcess):
@@ -97,7 +107,7 @@ class CompoundPoissonProcess(StochasticProcess):
     def generateValues(self, nVals=1, t=None, x0=None):
         _t = t or self.T
         _x0 = x0 or self.x0
-        numOfJumps = sp.poisson.rvs(mu=self.lam*_t, size=nVals)
+        numOfJumps = sp.poisson.rvs(mu=self.lam *_t, size=nVals)
         maxJumps = np.max(numOfJumps)
         jumpSizes = self.jumpSizeRV.rvs(size=(nVals, maxJumps))
         jumpSizes[numOfJumps[:,None] <= np.arange(jumpSizes.shape[1])] = 0
@@ -111,7 +121,7 @@ class CompoundPoissonProcess(StochasticProcess):
         paths = pd.DataFrame(np.ones((len(self.timePoints), nPaths)) * self.x0, index=self.timePoints)
         if self.compensated:
             paths = paths.sub(self.timePoints * self.lam * self.jumpSizeRV.mean(), axis=0)
-        numberOfJumps = sp.poisson.rvs(mu=self.lam*self.T, size=nPaths)
+        numberOfJumps = sp.poisson.rvs(mu=self.lam * self.T, size=nPaths)
         jumpTimes = np.array([sp.uniform.rvs(scale=self.T, size=n) for n in numberOfJumps], dtype=object)
         for i, jumps in enumerate(jumpTimes):
             for jump in jumps:
