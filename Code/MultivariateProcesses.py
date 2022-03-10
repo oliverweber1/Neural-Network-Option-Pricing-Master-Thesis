@@ -2,9 +2,6 @@ from StochasticProcesses import *
 
 class MultivariateProcess(StochasticProcess):
 
-    #def __init__(self, name, x0, d, T=1, nSteps=10000):
-    #    super().__init__(name, x0, T, nSteps, d)
-
     def generatePath(self):
         raise NotImplementedError('Must override generatePaths')
 
@@ -20,7 +17,6 @@ class CorrelatedBrownianMotion(MultivariateProcess):
 
     def __init__(self, d, x0=0., T=1, mu=None, sigma=None, Corr=None, nSteps=10000):
         super().__init__('Correlated Brownian Motion', x0, T, nSteps, d)
-        #self.Factors = np.eye(d) if Corr is None else np.linalg.cholesky(Corr)
         self.mu = np.zeros((d, 1)) if mu is None else np.reshape(mu, (d, 1))
         self.sigma = np.ones((d, 1)) if sigma is None else np.reshape(sigma, (d, 1))
         _Corr = np.eye(d) if Corr is None else Corr
@@ -29,16 +25,12 @@ class CorrelatedBrownianMotion(MultivariateProcess):
     def generateValues(self, nVals=1, t=None, x0=None):
         _t = t or self.T
         _x0 = self.x0 if x0 is None else x0.reshape((self.d,1))
-        #normalVals = self.Factors @ sp.norm.rvs(scale=np.sqrt(_t), size=(nVals, self.d, 1))
-        #return _x0 + self.mu * _t + self.sigma * normalVals
         normalVals = sp.multivariate_normal.rvs(mean=np.zeros(self.d), cov=self.cov, size=nVals).reshape((nVals, self.d, 1))
         return _x0 + self.mu * _t + np.sqrt(_t) * normalVals
         
 
     def generatePath(self):
         dt = self.T / (self.nSteps - 1)
-        #increments = np.append(np.zeros((self.d, 1)), sp.norm.rvs(scale=np.sqrt(dt), size=(self.d,self.nSteps - 1)), axis=1)
-        #paths = self.x0 + self.mu * self.timePoints + self.sigma * (self.Factors @ np.cumsum(increments, axis=1))
         increments = np.append(np.zeros((self.d, 1)), sp.multivariate_normal.rvs(mean=np.zeros(self.d), cov=self.cov, size=self.nSteps-1).T, axis=1)
         paths = self.x0 + self.mu * self.timePoints + np.sqrt(dt) * np.cumsum(increments, axis=1)
         return pd.DataFrame(paths.T, index=self.timePoints)
@@ -57,16 +49,27 @@ class MultivariateCompoundPoissonProcess(MultivariateProcess):
         cov = _sigma @ _Corr @ _sigma
         self.jumpSizeRV = sp.multivariate_normal(mean=_mu, cov=cov)
 
-    def generateValues(self, nVals=1, t=None, x0=None):
-        _t = t or self.T
-        _x0 = self.x0 if x0 is None else x0.reshape((self.d, 1))
-        numOfJumps = sp.poisson.rvs(mu=self.lam * _t, size=nVals)
+    def generateValueBatch(self, nVals, t):
+        """
+        Helper for generateValues, generates a batch of values
+        maxJumps (and then jumpSizes) gets too large for nVals > 10k
+        """
+        numOfJumps = sp.poisson.rvs(mu=self.lam * t, size=nVals)
         maxJumps = np.max(numOfJumps)
         jumpSizes = self.jumpSizeRV.rvs(size=(nVals, maxJumps))
         if nVals == 1:
             jumpSizes = np.reshape(jumpSizes, (1, maxJumps, self.d))
         jumpSizes[numOfJumps[:,None] <= np.arange(jumpSizes.shape[1])] = 0
-        return _x0 + jumpSizes.sum(axis=1).reshape((nVals, self.d, 1))
+        return jumpSizes.sum(axis=1)
+
+    def generateValues(self, nVals=1, t=None, x0=None):
+        _t = t or self.T
+        _x0 = self.x0 if x0 is None else x0.reshape((self.d, 1))
+        batchSize = 10000
+        batches = [batchSize] * (nVals // batchSize) + [nVals % batchSize]
+        values = np.array([self.generateValueBatch(batch, _t) for batch in batches if batch > 0])
+        return _x0 + values.reshape((nVals, self.d, 1))
+        
 
     def generatePath(self):
         paths = pd.DataFrame(np.ones((len(self.timePoints), self.d)) * self.x0.T, index=self.timePoints)

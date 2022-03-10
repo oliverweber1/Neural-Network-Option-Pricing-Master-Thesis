@@ -1,5 +1,6 @@
 from StochasticProcesses import *
 from MultivariateProcesses import *
+from tqdm import tqdm
 
 class AssetModel(StochasticProcess):
     """
@@ -8,8 +9,8 @@ class AssetModel(StochasticProcess):
     Additional drift mu can be used to "center" models (martingale condition for exp(-r*t)*S_t)
     """
 
-    def __init__(self, logPriceProcess, s0=1., mu=0., r=0.05):
-        super().__init__(name=logPriceProcess.name.replace('Process', 'Model'), T=logPriceProcess.T, x0=s0, nSteps=logPriceProcess.nSteps)
+    def __init__(self, logPriceProcess, s0=1., mu=0., r=0.05, d=1):
+        super().__init__(name=logPriceProcess.name.replace('Process', 'Model'), T=logPriceProcess.T, x0=s0, nSteps=logPriceProcess.nSteps, d=d)
         self.logPriceProcess = logPriceProcess
         if self.d > 1:
             self.mu = np.ones((self.d,1)) * mu if np.isscalar(mu) else mu.reshape((self.d,1))
@@ -93,10 +94,29 @@ class MultiAssetModel(AssetModel, MultivariateProcess):
     """
 
     def generatePath(self):
-        return self.x0 * np.exp((self.r - self.mu) * self.timePoints + self.logPriceProcess.generatePath().T).T
+        return (self.x0 * np.exp((self.r - self.mu) * self.timePoints + self.logPriceProcess.generatePath().T)).T
 
     def plotPath(self, figSize=(10,5)):
         return MultivariateProcess.plotPath(self, figSize)
+
+    def OptionPriceRangeMC(self, payoffFunc, assetStartVals, expiry=None, nSim=1000000):
+        """
+        Divides option price generation into prices with 10k simulations and combines them
+        in order to free up memory (required in higher dimensions)
+        """
+        batchSize = 10000
+        batches, rest = divmod(nSim, batchSize)
+        if batches == 0: # less than 10k simulations
+            return AssetModel.OptionPriceRangeMC(self, payoffFunc, assetStartVals, expiry, rest)
+        batchMean = np.zeros(len(assetStartVals))
+        for _ in tqdm(range(batches)):
+            batchMean += AssetModel.OptionPriceRangeMC(self, payoffFunc, assetStartVals, expiry, batchSize)
+        batchMean /= batches
+        if rest > 0: # take weighted mean with rest of simulations and the 10k batch mean
+            restVals = AssetModel.OptionPriceRangeMC(self, payoffFunc, assetStartVals, expiry, rest)
+            batchMean = (batches * batchSize * batchMean + rest * restVals) / nSim
+        return batchMean
+
 
 class MultiAssetMertonModel(MultiAssetModel):
     """
@@ -112,7 +132,7 @@ class MultiAssetMertonModel(MultiAssetModel):
         logPriceProcess = MultivariateJumpDiffusionProcess(BrownianPart=BrownianPart, JumpPart=JumpPart)
         expMomentJump = np.exp(_mu_j + _sig_j ** 2 / 2)
         mu = _sig_bm ** 2 / 2 + lam * (expMomentJump - 1) # martingale correction
-        super().__init__(logPriceProcess, s0, mu, r)
+        super().__init__(logPriceProcess, s0, mu, r, d)
         self.name = 'Multivariate Merton Jump Diffusion Model'
 
 class MultiAssetNIGModel(MultiAssetModel):
@@ -125,5 +145,5 @@ class MultiAssetNIGModel(MultiAssetModel):
         _sigma = np.ones((d,1)) if sigma is None else np.reshape(sigma, (d,1))
         logPriceProcess = MultivariateNIGProcess(d=d, T=T, nSteps=nSteps, kappa=kappa, theta=theta, sigma=sigma, Corr=Corr)
         mu = (1 - np.sqrt(1 - 2 * kappa * _theta - kappa * _sigma ** 2)) / kappa # martingale correction
-        super().__init__(logPriceProcess, s0, mu, r)
+        super().__init__(logPriceProcess, s0, mu, r, d)
         self.name = 'Multivariate Normal Inverse Gaussian Model'
