@@ -52,7 +52,7 @@ class MultivariateCompoundPoissonProcess(MultivariateProcess):
     def generateValueBatch(self, nVals, t):
         """
         Helper for generateValues, generates a batch of values
-        maxJumps (and then jumpSizes) gets too large for nVals > 10k
+        because maxJumps (and then jumpSizes) gets too large for nVals > 10k
         """
         numOfJumps = sp.poisson.rvs(mu=self.lam * t, size=nVals)
         maxJumps = np.max(numOfJumps)
