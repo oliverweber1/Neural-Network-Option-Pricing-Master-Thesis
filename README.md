@@ -1,7 +1,7 @@
 # Neural Network Approximations of European Option Prices in Exponential Lévy Models
 
 ### Option Price Generation
-- Simulations of stochastic processes (Brownian Motion, Compound Poisson Process, NIG Process) are implemented in *StochasticProcesses.py* and *MultivariateProcesses.py*
+- Simulations of stochastic processes (Brownian Motion, Compound Poisson Process, Jump Diffusion Process, NIG Process) are implemented in *StochasticProcesses.py* and *MultivariateProcesses.py*
 - European option price calculation via Monte-Carlo simulation is implemented in *OptionPricing.py* for Black-Scholes, Merton Jump Diffusion and NIG models
 - Analytic formulas for Black-Scholes and Merton Jump Diffusion prices are given in *AnalyticFormulas.py*
 - Paths of the Poisson process, compound Poisson process, Merton Jump Diffusion model and NIG model are plotted in *PathPlots.ipynb*
